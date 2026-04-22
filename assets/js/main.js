@@ -1,207 +1,217 @@
-        import * as THREE from 'three';
+import * as THREE from 'three';
 
-        import Stats from 'three/addons/libs/stats.module.js';
+import Stats from 'three/addons/libs/stats.module.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
-        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+// ================== VARIABLES ==================
+let camera, scene, renderer, stats, controls;
+let mixer;
+let clock = new THREE.Clock();
 
-        const manager = new THREE.LoadingManager();
+let object;
+let actions = {};
+let activeAction = null;
+let previousAction = null;
 
-        let camera, scene, renderer, stats, object, loader, guiMorphsFolder;
-        let mixer;
+const loader = new FBXLoader();
 
-        const timer = new THREE.Timer();
-        timer.connect(document);
+// ⚠️ Capoeira ya viene en Character.fbx (base)
+// Estas son SOLO las externas (sin skin)
+const animationsList = [
+    { name: "Praying", file: "Praying.fbx", key: "2" },
+    { name: "Sitting Laughing", file: "Sitting Laughing.fbx", key: "2" },
+    { name: "Old Man Idle", file: "Old Man Idle.fbx", key: "3" },
+    { name: "Dying", file: "Dying.fbx", key: "4" },
+    { name: "Female Pose", file: "Female Laying Pose.fbx", key: "5" }
+];
 
-        const params = {
-            asset: 'Samba Dancing'
-        };
+// ================== INIT ==================
+init();
 
-        const assets = [
-            'Samba Dancing',
-            'morph_test',
-            'monkey',
-            'monkey_embedded_texture',
-            'vCube',
-        ];
+function init() {
 
+    const container = document.getElementById('container');
 
-        init();
+    // 📷 Cámara
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+    camera.position.set(80, 120, 150);
 
-        function init() {
+    // 🌍 Escena
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1e1e2f);
+    scene.fog = new THREE.Fog(0x1e1e2f, 200, 1000);
 
-            const container = document.createElement('div');
-            document.body.appendChild(container);
+    // 💡 Luces
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 2);
+    hemiLight.position.set(0, 200, 0);
+    scene.add(hemiLight);
 
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
-            camera.position.set(100, 200, 300);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+    dirLight.position.set(0, 200, 100);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
 
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0xa0a0a0);
-            scene.fog = new THREE.Fog(0xa0a0a0, 200, 1000);
+    // 🧱 Piso
+    const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(2000, 2000),
+        new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false })
+    );
+    mesh.rotation.x = - Math.PI / 2;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
 
-            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 5);
-            hemiLight.position.set(0, 200, 0);
-            scene.add(hemiLight);
+    const grid = new THREE.GridHelper(2000, 20, 0x000000, 0x000000);
+    grid.material.opacity = 0.2;
+    grid.material.transparent = true;
+    scene.add(grid);
 
-            const dirLight = new THREE.DirectionalLight(0xffffff, 5);
-            dirLight.position.set(0, 200, 100);
-            dirLight.castShadow = true;
-            dirLight.shadow.camera.top = 180;
-            dirLight.shadow.camera.bottom = - 100;
-            dirLight.shadow.camera.left = - 120;
-            dirLight.shadow.camera.right = 120;
-            scene.add(dirLight);
+    // 🖥️ Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setAnimationLoop(animate);
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
 
-            // scene.add( new THREE.CameraHelper( dirLight.shadow.camera ) );
+    // 🎮 Controles
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 80, 0);
+    controls.update();
 
-            // ground
-            const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshPhongMaterial({ color: 0x999999, depthWrite: false }));
-            mesh.rotation.x = - Math.PI / 2;
-            mesh.receiveShadow = true;
-            scene.add(mesh);
+    // 📊 Stats
+    stats = new Stats();
+    container.appendChild(stats.dom);
 
-            const grid = new THREE.GridHelper(2000, 20, 0x000000, 0x000000);
-            grid.material.opacity = 0.2;
-            grid.material.transparent = true;
-            scene.add(grid);
+    // 📐 Resize
+    window.addEventListener('resize', onWindowResize);
 
-            loader = new FBXLoader(manager);
-            loadAsset(params.asset);
+    // ⌨️ Teclado
+    window.addEventListener("keydown", onKeyDown);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setAnimationLoop(animate);
-            renderer.shadowMap.enabled = true;
-            container.appendChild(renderer.domElement);
+    // 📦 Cargar modelo base
+    loadBaseModel();
+}
 
-            const controls = new OrbitControls(camera, renderer.domElement);
-            controls.target.set(0, 100, 0);
-            controls.update();
+// ================== MODELO BASE (CON CAPOEIRA) ==================
+function loadBaseModel() {
 
-            window.addEventListener('resize', onWindowResize);
+    loader.load('./assets/models/fbx/Character.fbx', function (group) {
 
-            // stats
-            stats = new Stats();
-            container.appendChild(stats.dom);
+        object = group;
 
-            const gui = new GUI();
-            gui.add(params, 'asset', assets).onChange(function (value) {
+        object.scale.set(0.5, 0.5, 0.5);
+        object.position.set(0, 0, 0);
 
-                loadAsset(value);
+        object.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                child.frustumCulled = false;
+            }
+        });
 
-            });
+        mixer = new THREE.AnimationMixer(object);
 
-            guiMorphsFolder = gui.addFolder('Morphs').hide();
+        scene.add(object);
 
+        // 🎯 Centrar cámara
+        const box = new THREE.Box3().setFromObject(object);
+        const center = box.getCenter(new THREE.Vector3());
+        controls.target.copy(center);
+        camera.lookAt(center);
+
+        // 🔥 ACTIVAR CAPOEIRA (viene dentro del modelo)
+        if (object.animations && object.animations.length > 0) {
+
+            const baseAction = mixer.clipAction(object.animations[0]);
+
+            actions["Capoeira"] = baseAction;
+
+            activeAction = baseAction;
+            baseAction.play();
         }
 
-        function loadAsset(asset) {
+        // cargar demás animaciones
+        loadAnimations();
+    });
+}
 
-            loader.load('./assets/models/fbx/' + asset + '.fbx', function (group) {
+// ================== ANIMACIONES EXTERNAS ==================
+function loadAnimations() {
 
-                if (object) {
+    animationsList.forEach(anim => {
 
-                    object.traverse(function (child) {
+        loader.load('./assets/models/fbx/' + anim.file, function (animObj) {
 
-                        if (child.isSkinnedMesh) {
+            const clip = animObj.animations[0];
+            const action = mixer.clipAction(clip);
 
-                            child.skeleton.dispose();
+            actions[anim.name] = action;
 
-                        }
+            console.log("Cargada:", anim.name);
+        });
 
-                        if (child.material) {
+    });
+}
 
-                            const materials = Array.isArray(child.material) ? child.material : [child.material];
-                            materials.forEach(material => {
+// ================== CAMBIAR ANIMACIÓN ==================
+function playAnimation(name) {
 
-                                if (material.map) material.map.dispose();
-                                material.dispose();
+    if (!actions[name]) return;
 
-                            });
+    previousAction = activeAction;
+    activeAction = actions[name];
 
-                        }
+    if (previousAction !== activeAction) {
 
-                        if (child.geometry) child.geometry.dispose();
+        if (previousAction) previousAction.fadeOut(0.5);
 
-                    });
+        activeAction
+            .reset()
+            .fadeIn(0.5)
+            .play();
+    }
+}
 
-                    scene.remove(object);
+// ================== TECLADO ==================
+function onKeyDown(e) {
 
-                }
+    switch (e.key) {
+        case "1":
+            playAnimation("Praying");
+            break;
+        case "2":
+            playAnimation("Sitting Laughing");
+            break;
+        case "3":
+            playAnimation("Old Man Idle");
+            break;
+        case "4":
+            playAnimation("Dying");
+            break;
+        case "5":
+            playAnimation("Female Pose");
+            break;
+    }
+}
 
-                //
+// ================== RESIZE ==================
+function onWindowResize() {
 
-                object = group;
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
 
-                if (object.animations && object.animations.length) {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
 
-                    mixer = new THREE.AnimationMixer(object);
+// ================== LOOP ==================
+function animate() {
 
-                    const action = mixer.clipAction(object.animations[0]);
-                    action.play();
+    const delta = clock.getDelta();
 
-                } else {
+    if (mixer) mixer.update(delta);
 
-                    mixer = null;
+    renderer.render(scene, camera);
 
-                }
-
-                guiMorphsFolder.children.forEach((child) => child.destroy());
-                guiMorphsFolder.hide();
-
-                object.traverse(function (child) {
-
-                    if (child.isMesh) {
-
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-
-                        if (child.morphTargetDictionary) {
-
-                            guiMorphsFolder.show();
-                            const meshFolder = guiMorphsFolder.addFolder(child.name || child.uuid);
-                            Object.keys(child.morphTargetDictionary).forEach((key) => {
-
-                                meshFolder.add(child.morphTargetInfluences, child.morphTargetDictionary[key], 0, 1, 0.01);
-
-                            });
-
-                        }
-
-                    }
-
-                });
-
-                scene.add(object);
-
-            });
-
-        }
-
-        function onWindowResize() {
-
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-
-            renderer.setSize(window.innerWidth, window.innerHeight);
-
-        }
-
-        //
-
-        function animate() {
-
-            timer.update();
-
-            const delta = timer.getDelta();
-
-            if (mixer) mixer.update(delta);
-
-            renderer.render(scene, camera);
-
-            stats.update();
-
-        }
+    stats.update();
+}
